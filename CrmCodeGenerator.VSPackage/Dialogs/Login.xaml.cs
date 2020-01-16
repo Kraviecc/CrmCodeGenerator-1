@@ -1,11 +1,10 @@
 ﻿using CrmCodeGenerator.VSPackage.Helpers;
 using CrmCodeGenerator.VSPackage.Model;
-using Microsoft.VisualStudio.Shell;
-using Microsoft.VisualStudio.Shell.Interop;
+using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
+using Microsoft.Xrm.Tooling.Connector;
 using System;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Windows;
@@ -19,10 +18,11 @@ namespace CrmCodeGenerator.VSPackage.Dialogs
     /// </summary>
     public partial class Login : Microsoft.VisualStudio.PlatformUI.DialogWindow
     {
-        
+
         public Context Context;
         Settings settings;
         private EntityMetadata[] _AllEntities;
+        private IOrganizationService _orgService;
         private bool _StillOpen = true;
         public bool StillOpen
         {
@@ -43,10 +43,10 @@ namespace CrmCodeGenerator.VSPackage.Dialogs
             this.settings = settings;
             this.txtPassword.Password = settings.Password;  // PasswordBox doesn't allow 2 way binding
             this.DataContext = settings;
-         
+
         }
 
-        
+
         protected override void OnSourceInitialized(EventArgs e)
         {
             base.OnSourceInitialized(e);
@@ -102,7 +102,7 @@ namespace CrmCodeGenerator.VSPackage.Dialogs
 
             UpdateStatus("", false);
         }
-        
+
         private void RefreshEntityList()
         {
             Update_AllEntities();
@@ -112,12 +112,12 @@ namespace CrmCodeGenerator.VSPackage.Dialogs
             }
 
             var entities = _AllEntities.Where(e =>
-                            {
-                                if (settings.IncludeNonStandard)
-                                    return true;
-                                else
-                                    return !EntityHelper.NonStandard.Contains(e.LogicalName);
-                            });
+            {
+                if (settings.IncludeNonStandard)
+                    return true;
+                else
+                    return !EntityHelper.NonStandard.Contains(e.LogicalName);
+            });
 
             var origSelection = settings.EntitiesToIncludeString;
             var newList = new ObservableCollection<string>();
@@ -133,21 +133,20 @@ namespace CrmCodeGenerator.VSPackage.Dialogs
         {
             try
             {
-                var connString = Microsoft.Xrm.Client.CrmConnection.Parse(settings.GetOrganizationCrmConnectionString());
-                var connection = new Microsoft.Xrm.Client.Services.OrganizationService(connString);
-
-                RetrieveAllEntitiesRequest request = new RetrieveAllEntitiesRequest()
+                var connection = _orgService ?? new CrmServiceClient(settings.GetOrganizationCrmConnectionString()).OrganizationServiceProxy;
+                RetrieveAllEntitiesRequest request = new RetrieveAllEntitiesRequest
                 {
                     EntityFilters = EntityFilters.Default,
                     RetrieveAsIfPublished = settings.IncludeUnpublish,
                 };
+
                 RetrieveAllEntitiesResponse response = (RetrieveAllEntitiesResponse)connection.Execute(request);
                 _AllEntities = response.EntityMetadata;
             }
             catch (Exception ex)
             {
                 var error = "[ERROR] " + ex.Message + (ex.InnerException != null ? "\n" + "[ERROR] " + ex.InnerException.Message : "");
-                UpdateStatus(error,false);
+                UpdateStatus(error, false);
                 UpdateStatus("Unable to refresh entities, check connection information", false);
             }
 
@@ -155,7 +154,7 @@ namespace CrmCodeGenerator.VSPackage.Dialogs
 
         private void IncludeNonStandardEntities_Click(object sender, RoutedEventArgs e)
         {
-            if(_AllEntities != null)
+            if (_AllEntities != null)
                 RefreshEntityList();  // if we don't have the entire list of entities don't do anything (eg if they havn't entered a username & password)
         }
 
@@ -165,13 +164,11 @@ namespace CrmCodeGenerator.VSPackage.Dialogs
             UpdateStatus("Logging in to CRM...", true);
             try
             {
-
-                var connection = Microsoft.Xrm.Client.CrmConnection.Parse(settings.GetOrganizationCrmConnectionString());
-                settings.CrmConnection = new Microsoft.Xrm.Client.Services.OrganizationService(connection);
+                settings.CrmConnection = new CrmServiceClient(settings.GetOrganizationCrmConnectionString()).OrganizationServiceProxy;
                 // TODO remove the QuickConnection class -->  settings.CrmConnection = QuickConnection.Connect(settings.CrmSdkUrl, settings.Domain, settings.Username, settings.Password, settings.CrmOrg);
                 if (settings.CrmConnection == null)
-                     throw new UserException("Unable to login to CRM, check to ensure you have the right organization");
-                
+                    throw new UserException("Unable to login to CRM, check to ensure you have the right organization");
+
                 UpdateStatus("Mapping entities, this might take a while depending on CRM server/connection speed... ", true);
                 var mapper = new Mapper(settings);
                 Context = mapper.MapContext();
@@ -184,8 +181,8 @@ namespace CrmCodeGenerator.VSPackage.Dialogs
             {
                 var error = "[ERROR] " + ex.Message + (ex.InnerException != null ? "\n" + "[ERROR] " + ex.InnerException.Message : "");
                 UpdateStatus(error, false);
-                UpdateStatus(ex.StackTrace,false);
-                UpdateStatus("Unable to map entities, see error above.",false);
+                UpdateStatus(ex.StackTrace, false);
+                UpdateStatus("Unable to map entities, see error above.", false);
             }
             UpdateStatus("", false);
         }
@@ -208,12 +205,54 @@ namespace CrmCodeGenerator.VSPackage.Dialogs
                 }));
             }
 
-            if(!string.IsNullOrWhiteSpace(message))
+            if (!string.IsNullOrWhiteSpace(message))
             {
                 Dispatcher.BeginInvoke(new Action(() => { Status.Update(message); }));
             }
 
             System.Windows.Forms.Application.DoEvents();  // Needed to allow the output window to update (also allows the cursor wait and form disable to show up)
+        }
+
+        private void LoginToCrm_OnClick(object sender, RoutedEventArgs e)
+        {
+            UpdateStatus("Logging in to CRM...", true);
+
+            CRMLoginForm crmLoginForm = new CRMLoginForm();
+            // Wire event to login response.   
+            crmLoginForm.ConnectionToCrmCompleted += ctrl_ConnectionToCrmCompleted;
+            // Show the login control.   
+            crmLoginForm.ShowDialog();
+
+            // Handle the returned CRM connection object.  
+            // On successful connection, display the CRM version and connected org name   
+            if (crmLoginForm.CrmConnectionMgr?.CrmSvc != null
+                && crmLoginForm.CrmConnectionMgr.CrmSvc.IsReady)
+            {
+                UpdateStatus(
+                    $"Connected to CRM! Version: {crmLoginForm.CrmConnectionMgr.CrmSvc.ConnectedOrgVersion} " +
+                    $"Org: {crmLoginForm.CrmConnectionMgr.CrmSvc.ConnectedOrgUniqueName}",
+                    false);
+
+                _orgService = crmLoginForm.CrmConnectionMgr.CrmSvc.OrganizationServiceProxy;
+                settings.OrgList = new ObservableCollection<string>(new[] { crmLoginForm.CrmConnectionMgr.CrmSvc.ConnectedOrgFriendlyName });
+            }
+            else
+            {
+                UpdateStatus(
+                    $"Cannot connect to Dynamics. Error: {crmLoginForm.CrmConnectionMgr?.CrmSvc?.LastCrmException}",
+                    false);
+            }
+        }
+
+        private void ctrl_ConnectionToCrmCompleted(object sender, EventArgs e)
+        {
+            if (sender is CRMLoginForm)
+            {
+                this.Dispatcher.Invoke(() =>
+                {
+                    ((CRMLoginForm)sender).Close();
+                });
+            }
         }
     }
 }
