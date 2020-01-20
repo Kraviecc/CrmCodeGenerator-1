@@ -55,6 +55,8 @@ namespace CrmCodeGenerator.VSPackage.Dialogs
         public event EventHandler ConnectionToCrmCompleted;
         #endregion
 
+        public string AppId { get; set; }
+        public Uri RedirectUri { get; set; }
 
         public CRMLoginForm()
         {
@@ -85,6 +87,9 @@ namespace CrmCodeGenerator.VSPackage.Dialogs
 
             // Init the CRM Connection manager.. 
             mgr = new CrmConnectionManager();
+            mgr.ClientId = AppId;
+            mgr.RedirectUri = RedirectUri;
+
             // Pass a reference to the current UI or container control,  this is used to synchronize UI threads In the login control
             mgr.ParentControl = CrmLoginCtrl;
             // if you are using an unmanaged client, excel for example, and need to store the config in the users local directory
