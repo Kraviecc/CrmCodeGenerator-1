@@ -218,13 +218,11 @@ namespace CrmCodeGenerator.VSPackage.Dialogs
             UpdateStatus("Logging in to CRM...", true);
 
             CRMLoginForm crmLoginForm = new CRMLoginForm();
-            // Wire event to login response.   
+            crmLoginForm.AppId = "2ad88395-b77d-4561-9441-d0e40824f9bc";
+            crmLoginForm.RedirectUri = new Uri("app://5d3e90d6-aa8e-48a8-8f2c-58b45cc67315");
             crmLoginForm.ConnectionToCrmCompleted += ctrl_ConnectionToCrmCompleted;
-            // Show the login control.   
             crmLoginForm.ShowDialog();
 
-            // Handle the returned CRM connection object.  
-            // On successful connection, display the CRM version and connected org name   
             if (crmLoginForm.CrmConnectionMgr?.CrmSvc != null
                 && crmLoginForm.CrmConnectionMgr.CrmSvc.IsReady)
             {
