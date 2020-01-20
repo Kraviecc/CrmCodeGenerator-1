@@ -164,7 +164,7 @@ namespace CrmCodeGenerator.VSPackage.Dialogs
             UpdateStatus("Logging in to CRM...", true);
             try
             {
-                settings.CrmConnection = new CrmServiceClient(settings.GetOrganizationCrmConnectionString()).OrganizationServiceProxy;
+                settings.CrmConnection = _orgService ?? new CrmServiceClient(settings.GetOrganizationCrmConnectionString()).OrganizationServiceProxy;
                 // TODO remove the QuickConnection class -->  settings.CrmConnection = QuickConnection.Connect(settings.CrmSdkUrl, settings.Domain, settings.Username, settings.Password, settings.CrmOrg);
                 if (settings.CrmConnection == null)
                     throw new UserException("Unable to login to CRM, check to ensure you have the right organization");
@@ -232,6 +232,7 @@ namespace CrmCodeGenerator.VSPackage.Dialogs
                     false);
 
                 _orgService = crmLoginForm.CrmConnectionMgr.CrmSvc.OrganizationServiceProxy;
+                _orgService = crmLoginForm.CrmConnectionMgr.CrmSvc;
                 settings.OrgList = new ObservableCollection<string>(new[] { crmLoginForm.CrmConnectionMgr.CrmSvc.ConnectedOrgFriendlyName });
             }
             else
